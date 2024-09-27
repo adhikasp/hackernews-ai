@@ -1,0 +1,19 @@
+{
+  "name": "hacker-news-ai-plugin",
+  "version": "1.0.0",
+  "description": "A chrome extension that summarizes Hacker News discussions and answers questions about the content",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "dev": "node scripts/build.js --watch"
+  },
+  "dependencies": {
+    "@langchain/core": "^0.3.3",
+    "@langchain/openai": "^0.3.2",
+    "@langchain/anthropic": "^0.1.1"
+  },
+  "devDependencies": {
+    "fs-extra": "^11.1.1",
+    "webpack": "^5.88.0",
+    "webpack-cli": "^5.1.4"
+  }
+}

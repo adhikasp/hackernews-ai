@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Hacker News AI Plugin</title>
+  <style>
+    body {
+      width: 400px;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+    }
+    h1 {
+      font-size: 18px;
+      margin-bottom: 15px;
+    }
+    button, input {
+      margin-bottom: 10px;
+      padding: 5px 10px;
+    }
+    textarea, input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    textarea {
+      height: 60px;
+    }
+    #result {
+      margin-top: 15px;
+      border: 1px solid #ccc;
+      padding: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    /* Basic HTML content styling */
+    #result h1, #result h2, #result h3 {
+      margin-top: 10px;
+      margin-bottom: 5px;
+    }
+    #result p {
+      margin-bottom: 10px;
+    }
+    #result ul, #result ol {
+      margin-left: 20px;
+    }
+    #result code {
+      background-color: #f0f0f0;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+    #result pre {
+      background-color: #f0f0f0;
+      padding: 10px;
+      border-radius: 3px;
+      overflow-x: auto;
+    }
+  </style>
+  <script src="popup.js"></script>
+</head>
+<body>
+  <h1>Hacker News AI Plugin</h1>
+  <input type="text" id="api-key" placeholder="Enter Anthropic API Key">
+  <button id="save-api-key">Save API Key</button>
+  <button id="summarize">Summarize Discussion</button>
+  <textarea id="question" placeholder="Ask a question about the content"></textarea>
+  <button id="ask">Ask</button>
+  <div id="result"></div>
+</body>
+</html>

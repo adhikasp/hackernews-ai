@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Hacker News AI Plugin",
+  "version": "1.0",
+  "description": "Summarize Hacker News discussions and answer questions about the content",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": [
+    "https://api.anthropic.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://news.ycombinator.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
