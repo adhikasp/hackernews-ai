@@ -23,8 +23,10 @@ if (isDiscussionPage()) {
       const summaryCache = result.summaryCache || {};
 
       if (summaryCache[cacheKey]) {
+        console.info("Using cached summary");
         displaySummaryOnPage(summaryCache[cacheKey]);
       } else {
+        console.info("Generating new summary");
         initializeModel(result);
         showLoadingIndicator();
         extractAndSummarizeDiscussion().then(summary => {
@@ -44,13 +46,15 @@ if (isDiscussionPage()) {
 
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === "summarize") {
-    const cacheKey = getCacheKey(window.location.href, request.selectedModel);
-    chrome.storage.local.get(['summaryCache'], function(result) {
+    chrome.storage.local.get(['summaryCache', 'selectedModel'], function(result) {
+      const cacheKey = getCacheKey(window.location.href, result.selectedModel);
       const summaryCache = result.summaryCache || {};
       if (summaryCache[cacheKey]) {
+        console.log("Using cached summary");
         displaySummaryOnPage(summaryCache[cacheKey]);
         sendResponse({summary: summaryCache[cacheKey]});
       } else {
+        console.log("Generating new summary");
         initializeModel(request);
         showLoadingIndicator();
         extractAndSummarizeDiscussion().then(summary => {

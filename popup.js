@@ -59,6 +59,7 @@ function saveConfiguration() {
   chrome.storage.local.get(['selectedModel', 'summaryCache'], function(result) {
     if (result.selectedModel !== selectedModel) {
       // Clear the summary cache if the model has changed
+      console.log("Clearing cache due to model change");
       dataToSave.summaryCache = {};
     } else {
       dataToSave.summaryCache = result.summaryCache || {};
