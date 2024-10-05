@@ -1,4 +1,5 @@
 import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 
@@ -9,38 +10,65 @@ function isDiscussionPage() {
   return window.location.pathname === '/item' && window.location.search.includes('id=');
 }
 
+// Function to generate a cache key
+function getCacheKey(url, selectedModel) {
+  return `${url}|${selectedModel}`;
+}
+
 // Automatically run summarization if it's a discussion page
 if (isDiscussionPage()) {
-  chrome.storage.local.get(['anthropicApiKey'], function(result) {
-    if (result.anthropicApiKey) {
-      initializeModel(result.anthropicApiKey);
-      showLoadingIndicator();
-      extractAndSummarizeDiscussion().then(summary => {
-        displaySummaryOnPage(summary);
-      }).catch(error => {
-        console.error("Error auto-summarizing:", error);
-        hideLoadingIndicator();
-        displayErrorOnPage("An error occurred while summarizing the discussion.");
-      });
+  chrome.storage.local.get(['anthropicApiKey', 'openaiApiKey', 'selectedModel', 'summaryCache'], function(result) {
+    if (result.anthropicApiKey || result.openaiApiKey) {
+      const cacheKey = getCacheKey(window.location.href, result.selectedModel);
+      const summaryCache = result.summaryCache || {};
+
+      if (summaryCache[cacheKey]) {
+        displaySummaryOnPage(summaryCache[cacheKey]);
+      } else {
+        initializeModel(result);
+        showLoadingIndicator();
+        extractAndSummarizeDiscussion().then(summary => {
+          // Cache the summary
+          summaryCache[cacheKey] = summary;
+          chrome.storage.local.set({ summaryCache: summaryCache });
+          displaySummaryOnPage(summary);
+        }).catch(error => {
+          console.error("Error auto-summarizing:", error);
+          hideLoadingIndicator();
+          displayErrorOnPage("An error occurred while summarizing the discussion.");
+        });
+      }
     }
   });
 }
 
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === "summarize") {
-    initializeModel(request.apiKey);
-    showLoadingIndicator();
-    extractAndSummarizeDiscussion().then(summary => {
-      displaySummaryOnPage(summary);
-      sendResponse({summary: summary});
-    }).catch(error => {
-      hideLoadingIndicator();
-      displayErrorOnPage("An error occurred while summarizing the discussion.");
-      sendResponse({error: error.message || "An error occurred while summarizing the discussion."});
+    const cacheKey = getCacheKey(window.location.href, request.selectedModel);
+    chrome.storage.local.get(['summaryCache'], function(result) {
+      const summaryCache = result.summaryCache || {};
+      if (summaryCache[cacheKey]) {
+        displaySummaryOnPage(summaryCache[cacheKey]);
+        sendResponse({summary: summaryCache[cacheKey]});
+      } else {
+        initializeModel(request);
+        showLoadingIndicator();
+        extractAndSummarizeDiscussion().then(summary => {
+          // Cache the summary
+          summaryCache[cacheKey] = summary;
+          chrome.storage.local.set({ summaryCache: summaryCache });
+          displaySummaryOnPage(summary);
+          sendResponse({summary: summary});
+        }).catch(error => {
+          hideLoadingIndicator();
+          displayErrorOnPage("An error occurred while summarizing the discussion.");
+          sendResponse({error: error.message || "An error occurred while summarizing the discussion."});
+        });
+      }
     });
     return true;  // Indicates that the response will be sent asynchronously
   } else if (request.action === "ask") {
-    initializeModel(request.apiKey);
+    initializeModel(request);
     showLoadingIndicator();
     answerQuestion(request.question).then(answer => {
       displaySummaryOnPage(answer);
@@ -54,24 +82,59 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   }
 });
 
-function initializeModel(apiKey) {
-  model = new ChatAnthropic({
-    anthropicApiKey: apiKey,
-    modelName: "claude-3-haiku-20240307",
-    clientOptions: {
-      defaultHeaders: {
+// Modify the initializeModel function
+function initializeModel(config) {
+  const selectedModel = config.selectedModel;
+  if (selectedModel.startsWith('claude-')) {
+    if (!config.anthropicApiKey) {
+      throw new Error("Anthropic API key is required for Claude models.");
+    }
+    model = new ChatAnthropic({
+      anthropicApiKey: config.anthropicApiKey,
+      modelName: selectedModel,
+      clientOptions: {
+        defaultHeaders: {
           "anthropic-dangerous-direct-browser-access": "true",
+        },
       },
-    },
-  });
+    });
+  } else if (selectedModel.startsWith('gpt-')) {
+    if (!config.openaiApiKey) {
+      throw new Error("OpenAI API key is required for GPT models.");
+    }
+    model = new ChatOpenAI({
+      openAIApiKey: config.openaiApiKey,
+      modelName: selectedModel,
+    });
+  } else {
+    throw new Error("Invalid model selected.");
+  }
 }
 
 async function extractAndSummarizeDiscussion() {
   const pageContent = document.body.innerText;
   
-  const prompt = PromptTemplate.fromTemplate(
-    "Summarize the following Hacker News discussion in a concise manner. Surface interesting insights and unique perpsective in that are being discussed. Analyze the overall sentiment of the discussion. Do not include title or opening paragraph like 'here is summary of the discussion'. Format in HTML markup. Use <ol> or <ul> to list out the points.\n\n<text>{text}</text>"
-  );
+  const prompt = PromptTemplate.fromTemplate(`
+    Analyze and summarize the following Hacker News discussion using these steps:
+
+    1. Read through the entire discussion carefully.
+    2. Identify the main topics and themes being discussed.
+    3. Note any interesting insights or unique perspectives shared by commenters.
+    4. Consider the overall sentiment of the discussion (positive, negative, neutral, or mixed).
+    5. Organize the key points into a logical structure.
+    6. Summarize the discussion concisely, highlighting the most important aspects.
+    7. Format the summary using HTML markup, utilizing <ol> or <ul> for listing points.
+
+    Remember:
+    - Do not include a title or opening paragraph like "Here is a summary of the discussion."
+    - Focus on surfacing valuable insights and unique viewpoints.
+    - Ensure the summary is concise yet comprehensive.
+
+    Discussion content:
+    <text>{text}</text>
+
+    Based on the above steps, provide a well-structured summary of the Hacker News discussion.
+  `);
 
   const chain = prompt.pipe(model).pipe(new StringOutputParser());
 
@@ -84,9 +147,26 @@ async function extractAndSummarizeDiscussion() {
 async function answerQuestion(question) {
   const pageContent = document.body.innerText;
   
-  const prompt = PromptTemplate.fromTemplate(
-    "Based on the following Hacker News discussion. Format in HTML markup. Answer this question: {question}\n\nDiscussion content:\n{text}"
-  );
+  const prompt = PromptTemplate.fromTemplate(`
+    You are an AI assistant analyzing a Hacker News discussion. Your task is to answer a specific question based on the content of the discussion.
+
+    Discussion content:
+    {text}
+
+    Question to answer:
+    {question}
+
+    Instructions:
+    1. Carefully read and analyze the discussion content.
+    2. Focus on answering the given question accurately and concisely.
+    3. If the answer is not directly stated in the discussion, use the context to provide the most relevant and informed response possible.
+    4. Include relevant quotes or examples from the discussion to support your answer, if applicable.
+    5. If the question cannot be answered based on the given discussion, state this clearly and explain why.
+    6. Format your response using appropriate HTML markup for readability (e.g., <p>, <ul>, <ol>, <strong>, <em>).
+    7. Ensure your answer is objective and based solely on the information provided in the discussion.
+
+    Provide your answer below:
+  `);
 
   const chain = prompt.pipe(model).pipe(new StringOutputParser());
 
@@ -95,6 +175,31 @@ async function answerQuestion(question) {
     text: pageContent,
   });
   return answer;
+}
+
+function handleAskQuestion() {
+  const question = document.getElementById('ai-question-input').value;
+  if (!question) {
+    alert("Please enter a question.");
+    return;
+  }
+
+  showLoadingIndicator();
+  chrome.storage.local.get(['anthropicApiKey', 'openaiApiKey', 'selectedModel'], function(result) {
+    if (result.anthropicApiKey || result.openaiApiKey) {
+      initializeModel(result);
+      answerQuestion(question).then(answer => {
+        displayAnswerOnPage(answer);
+      }).catch(error => {
+        console.error("Error answering question:", error);
+        hideLoadingIndicator();
+        displayErrorOnPage("An error occurred while answering the question.");
+      });
+    } else {
+      hideLoadingIndicator();
+      displayErrorOnPage("Please set your API key in the extension popup.");
+    }
+  });
 }
 
 function displaySummaryOnPage(summary) {
@@ -118,11 +223,45 @@ function displaySummaryOnPage(summary) {
     } else {
       document.body.insertAdjacentElement('afterbegin', summaryContainer);
     }
+
+    // Create the structure only if it doesn't exist
+    summaryContainer.innerHTML = `
+      <h3 style="margin: 0 0 10px 0; color: #ff6600;">AI-Generated Summary</h3>
+      <div id="ai-summary-content"></div>
+      <div id="ai-question-container" style="margin-top: 15px;">
+        <input type="text" id="ai-question-input" placeholder="Ask a question about the content" style="width: 100%; padding: 5px; margin-bottom: 10px;">
+        <button id="ai-ask-button" style="padding: 5px 10px; background-color: #ff6600; color: white; border: none; cursor: pointer;">Ask</button>
+      </div>
+      <div id="ai-answer-container" style="margin-top: 15px; display: none;"></div>
+    `;
+
+    // Add event listener for the ask button
+    document.getElementById('ai-ask-button').addEventListener('click', handleAskQuestion);
+
+    // Add event listener for the Enter key on the input field
+    document.getElementById('ai-question-input').addEventListener('keypress', function(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault(); // Prevent the default action
+        handleAskQuestion();
+      }
+    });
   }
 
-  summaryContainer.innerHTML = `
-    <h3 style="margin: 0 0 10px 0; color: #ff6600;">AI-Generated Summary</h3>
-    ${summary}
+  // Update only the summary content
+  const summaryContent = document.getElementById('ai-summary-content');
+  if (summaryContent) {
+    summaryContent.innerHTML = summary;
+  }
+}
+
+function displayAnswerOnPage(answer) {
+  hideLoadingIndicator();
+  
+  const answerContainer = document.getElementById('ai-answer-container');
+  answerContainer.style.display = 'block';
+  answerContainer.innerHTML = `
+    <h4 style="margin: 0 0 10px 0; color: #ff6600;">AI Answer</h4>
+    ${answer}
   `;
 }
 

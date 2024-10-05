@@ -1,96 +1,83 @@
 document.addEventListener('DOMContentLoaded', function() {
-  document.getElementById('summarize').addEventListener('click', summarizeDiscussion);
-  document.getElementById('ask').addEventListener('click', askQuestion);
-  document.getElementById('save-api-key').addEventListener('click', saveApiKey);
+  document.getElementById('save-config').addEventListener('click', saveConfiguration);
   
   // Load saved state
-  chrome.storage.local.get(['lastResult', 'lastQuestion', 'anthropicApiKey'], function(result) {
-    if (result.lastResult) {
-      document.getElementById('result').innerHTML = result.lastResult;
-    }
-    if (result.lastQuestion) {
-      document.getElementById('question').value = result.lastQuestion;
-    }
+  chrome.storage.local.get(['anthropicApiKey', 'openaiApiKey', 'selectedModel'], function(result) {
     if (result.anthropicApiKey) {
-      document.getElementById('api-key').value = result.anthropicApiKey;
+      document.getElementById('anthropic-api-key').value = maskApiKey(result.anthropicApiKey);
+      document.getElementById('anthropic-api-key').dataset.masked = 'true';
     }
+    if (result.openaiApiKey) {
+      document.getElementById('openai-api-key').value = maskApiKey(result.openaiApiKey);
+      document.getElementById('openai-api-key').dataset.masked = 'true';
+    }
+    if (result.selectedModel) {
+      document.getElementById('model-select').value = result.selectedModel;
+    }
+  });
+
+  // Add event listeners for api-key inputs
+  ['anthropic-api-key', 'openai-api-key'].forEach(id => {
+    document.getElementById(id).addEventListener('focus', function() {
+      if (this.dataset.masked === 'true') {
+        this.value = '';
+        this.dataset.masked = 'false';
+      }
+    });
+
+    document.getElementById(id).addEventListener('blur', function() {
+      if (this.value === '') {
+        const key = id === 'anthropic-api-key' ? 'anthropicApiKey' : 'openaiApiKey';
+        chrome.storage.local.get([key], function(result) {
+          if (result[key]) {
+            document.getElementById(id).value = maskApiKey(result[key]);
+            document.getElementById(id).dataset.masked = 'true';
+          }
+        });
+      }
+    });
   });
 });
 
-function saveApiKey() {
-  const apiKey = document.getElementById('api-key').value;
-  chrome.storage.local.set({anthropicApiKey: apiKey}, function() {
-    alert('API key saved successfully!');
-  });
-}
-
-function summarizeDiscussion() {
-  chrome.storage.local.get(['anthropicApiKey'], function(result) {
-    if (!result.anthropicApiKey) {
-      displayError("Please enter and save your Anthropic API key first.");
-      return;
-    }
-    
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-      chrome.tabs.sendMessage(tabs[0].id, {action: "summarize", apiKey: result.anthropicApiKey}, function(response) {
-        if (chrome.runtime.lastError) {
-          console.error(chrome.runtime.lastError);
-          displayError("Unable to communicate with the page. Make sure you're on a Hacker News page.");
-        } else if (response && response.summary) {
-          const result = response.summary;
-          document.getElementById('result').innerHTML = result;
-          // Save the result
-          chrome.storage.local.set({lastResult: result});
-        } else if (response && response.error) {
-          displayError(response.error);
-        } else {
-          displayError("Unexpected response from content script.");
-        }
-      });
-    });
-  });
-}
-
-function askQuestion() {
-  const question = document.getElementById('question').value;
-  if (!question) {
-    displayError("Please enter a question.");
-    return;
-  }
+function saveConfiguration() {
+  const anthropicApiKey = document.getElementById('anthropic-api-key').value;
+  const openaiApiKey = document.getElementById('openai-api-key').value;
+  const selectedModel = document.getElementById('model-select').value;
   
-  chrome.storage.local.get(['anthropicApiKey'], function(result) {
-    if (!result.anthropicApiKey) {
-      displayError("Please enter and save your Anthropic API key first.");
-      return;
+  const dataToSave = {
+    selectedModel: selectedModel
+  };
+
+  // Only update API keys if they're not all asterisks
+  if (!/^\*+$/.test(anthropicApiKey)) {
+    dataToSave.anthropicApiKey = anthropicApiKey;
+  }
+  if (!/^\*+$/.test(openaiApiKey)) {
+    dataToSave.openaiApiKey = openaiApiKey;
+  }
+
+  chrome.storage.local.get(['selectedModel', 'summaryCache'], function(result) {
+    if (result.selectedModel !== selectedModel) {
+      // Clear the summary cache if the model has changed
+      dataToSave.summaryCache = {};
+    } else {
+      dataToSave.summaryCache = result.summaryCache || {};
     }
-    
-    // Save the question
-    chrome.storage.local.set({lastQuestion: question});
-    
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-      chrome.tabs.sendMessage(tabs[0].id, {action: "ask", question: question, apiKey: result.anthropicApiKey}, function(response) {
-        if (chrome.runtime.lastError) {
-          console.error(chrome.runtime.lastError);
-          displayError("Unable to communicate with the page. Make sure you're on a Hacker News page.");
-        } else if (response && response.answer) {
-          const result = response.answer;
-          document.getElementById('result').innerHTML = result;
-          // Save the result
-          chrome.storage.local.set({lastResult: result});
-        } else if (response && response.error) {
-          displayError(response.error);
-        } else {
-          displayError("Unexpected response from content script.");
-        }
-      });
+
+    chrome.storage.local.set(dataToSave, function() {
+      if (dataToSave.anthropicApiKey) {
+        document.getElementById('anthropic-api-key').value = maskApiKey(anthropicApiKey);
+        document.getElementById('anthropic-api-key').dataset.masked = 'true';
+      }
+      if (dataToSave.openaiApiKey) {
+        document.getElementById('openai-api-key').value = maskApiKey(openaiApiKey);
+        document.getElementById('openai-api-key').dataset.masked = 'true';
+      }
+      alert('Configuration saved successfully!');
     });
   });
 }
 
-function displayError(message) {
-  const errorMessage = typeof message === 'object' ? JSON.stringify(message, null, 2) : message;
-  document.getElementById('result').innerHTML = `<p style="color: red;">Error: ${errorMessage}</p>`;
-  console.error("Error:", message);
-  // Save the error message
-  chrome.storage.local.set({lastResult: `<p style="color: red;">Error: ${errorMessage}</p>`});
+function maskApiKey(apiKey) {
+  return '*'.repeat(apiKey.length);
 }
